@@ -195,7 +195,7 @@ static void canvas_draw(Layer *l, GContext *ctx) {
 #endif
   // button hints at the right edge, next to the physical buttons
   {
-    int hx = W - PBL_IF_ROUND_ELSE(W / 7, big ? 10 : 8), r = big ? 6 : 5;
+    int hx = W - PBL_IF_ROUND_ELSE(W / 7, big ? 12 : 10), r = big ? 6 : 5;
     int ys[3] = { H * 30 / 100, H / 2, H * 70 / 100 };
     int kinds[3] = { OV_PREV, s_playing ? OV_PAUSE : OV_PLAY, OV_NEXT };
     if (s_rate_mode) { kinds[0] = OV_LIKE; kinds[1] = OV_INFO; kinds[2] = OV_DISLIKE; }
