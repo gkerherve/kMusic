@@ -88,7 +88,7 @@ class MainActivity : Activity() {
         })
         setContentView(ScrollView(this).apply {
             isFillViewport = true
-            background = root.background
+            background = root.background; root.background = null   // one drawable, one view
             addView(root)
         })
     }
