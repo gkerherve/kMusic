@@ -88,11 +88,30 @@ class MusicService : NotificationListenerService() {
             Cmd.PLAYPAUSE -> c?.transportControls?.let { if (c.playbackState?.state == PlaybackState.STATE_PLAYING) it.pause() else it.play() }
             Cmd.NEXT -> c?.transportControls?.skipToNext()
             Cmd.PREV -> c?.transportControls?.skipToPrevious()
-            Cmd.VOL_UP -> { c?.adjustVolume(AudioManager.ADJUST_RAISE, 0); main.postDelayed({ pushState() }, 150) }
-            Cmd.VOL_DOWN -> { c?.adjustVolume(AudioManager.ADJUST_LOWER, 0); main.postDelayed({ pushState() }, 150) }
+            Cmd.VOL_UP -> changeVolume(AudioManager.ADJUST_RAISE)
+            Cmd.VOL_DOWN -> changeVolume(AudioManager.ADJUST_LOWER)
             Cmd.LIKE -> rate(true)
             Cmd.DISLIKE -> rate(false)
         }
+    }
+
+    /**
+     * Volume of the MUSIC stream only, one step at a time, never below 0 and never
+     * touching the ringer (so the phone can't drop into silent / vibrate), no sound, no UI.
+     * Casting (remote playback) uses the session's own volume instead.
+     */
+    private fun changeVolume(dir: Int) {
+        val c = ctrl
+        val remote = c?.playbackInfo?.playbackType == MediaController.PlaybackInfo.PLAYBACK_TYPE_REMOTE
+        if (remote) c?.adjustVolume(dir, 0)
+        else {
+            val am = getSystemService(AudioManager::class.java)
+            val cur = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+            val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+            val next = (cur + if (dir == AudioManager.ADJUST_RAISE) 1 else -1).coerceIn(0, max)
+            if (next != cur) am.setStreamVolume(AudioManager.STREAM_MUSIC, next, 0)
+        }
+        link.send(mapOf(K.VOL to PebbleLink.V.I(volumePct(c))))
     }
 
     /** YouTube Music exposes thumbs up / down as custom actions; other players use ratings. */
@@ -128,9 +147,13 @@ class MusicService : NotificationListenerService() {
         packageManager.getApplicationLabel(packageManager.getApplicationInfo(c.packageName, 0)).toString()
     } catch (_: Exception) { c.packageName }
 
-    private fun volumePct(c: MediaController): Int {
-        val pi = c.playbackInfo ?: return -1
-        return if (pi.maxVolume > 0) pi.currentVolume * 100 / pi.maxVolume else -1
+    private fun volumePct(c: MediaController?): Int {
+        val pi = c?.playbackInfo
+        if (pi != null && pi.playbackType == MediaController.PlaybackInfo.PLAYBACK_TYPE_REMOTE && pi.maxVolume > 0)
+            return pi.currentVolume * 100 / pi.maxVolume
+        val am = getSystemService(AudioManager::class.java)
+        val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        return if (max > 0) am.getStreamVolume(AudioManager.STREAM_MUSIC) * 100 / max else -1
     }
 
     private fun position(s: PlaybackState?): Int {

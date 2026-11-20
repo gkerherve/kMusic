@@ -7,7 +7,7 @@
 // #define KMUSIC_DEMO 1   // fake song + generated cover, for emulator screenshots
 
 enum { CMD_PLAYPAUSE = 1, CMD_NEXT = 2, CMD_PREV = 3, CMD_VOL_UP = 4, CMD_VOL_DOWN = 5, CMD_HELLO = 6, CMD_LIKE = 7, CMD_DISLIKE = 8 };
-enum { OV_NONE, OV_PLAY, OV_PAUSE, OV_NEXT, OV_PREV, OV_LIKE, OV_DISLIKE, OV_INFO };
+enum { OV_NONE, OV_PLAY, OV_PAUSE, OV_NEXT, OV_PREV, OV_LIKE, OV_DISLIKE, OV_INFO, OV_PLUS, OV_MINUS };
 
 static Window *s_win;
 static Layer *s_canvas;
@@ -90,6 +90,12 @@ static void draw_icon(GContext *ctx, int kind, GPoint c, int r) {   // white gly
       graphics_fill_rect(ctx, GRect(c.x - u / 2, f > 0 ? palm.origin.y - th + 2 : palm.origin.y + h - 2, u * 2 / 3 + 1, th), 2, GCornersAll);
       break;
     }
+    case OV_PLUS:
+      graphics_fill_rect(ctx, GRect(c.x - 1, c.y - u + 1, 3, u * 2 - 1), 0, GCornerNone);
+      /* fallthrough */
+    case OV_MINUS:
+      graphics_fill_rect(ctx, GRect(c.x - u + 1, c.y - 1, u * 2 - 1, 3), 0, GCornerNone);
+      break;
     case OV_INFO:
       graphics_fill_circle(ctx, GPoint(c.x, c.y - u * 3 / 4), u / 4 + 1);
       graphics_fill_rect(ctx, GRect(c.x - u / 4, c.y - u / 3, u / 2 + 1, u + u / 3), 1, GCornersAll);
@@ -109,115 +115,117 @@ static void draw_note(GContext *ctx, GRect r) {   // placeholder cover: a music 
   graphics_fill_rect(ctx, GRect(x + s * 36 / 100 + s / 10 - 3, y + s * 18 / 100, s * 30 / 100 + 3, s / 12 + 1), 0, GCornerNone);
 }
 
+// Big glyph on a black tab that sticks out of the screen edge, right next to a physical button.
+static void edge_tab(GContext *ctx, GRect b, int y, int kind, bool big) {
+  int R = big ? 24 : 18, g = big ? 14 : 10;
+#if defined(PBL_ROUND)
+  int r = b.size.w / 2, dy = y - b.size.h / 2, ex = b.size.w / 2;
+  for (int x = 0; x <= r; x++) if (x * x + dy * dy <= r * r) ex = b.size.w / 2 + x;   // rim x at this y
+#else
+  int ex = b.size.w;
+#endif
+  graphics_context_set_fill_color(ctx, GColorBlack);
+  graphics_fill_circle(ctx, GPoint(ex + 4, y), R);
+  graphics_context_set_stroke_color(ctx, PBL_IF_COLOR_ELSE(GColorDarkGray, GColorWhite));
+  graphics_context_set_stroke_width(ctx, 1);
+  graphics_draw_circle(ctx, GPoint(ex + 4, y), R);
+  graphics_context_set_fill_color(ctx, GColorWhite);
+  draw_icon(ctx, kind, GPoint(ex - R / 2 + 2, y), g);
+}
+
 static void canvas_draw(Layer *l, GContext *ctx) {
   GRect b = layer_get_bounds(l);
   int W = b.size.w, H = b.size.h, S = s_S;
   bool big = W >= 200;
-  GFont f_title = fonts_get_system_font(big ? FONT_KEY_GOTHIC_24_BOLD : FONT_KEY_GOTHIC_18_BOLD);
-  GFont f_artist = fonts_get_system_font(big ? FONT_KEY_GOTHIC_18 : FONT_KEY_GOTHIC_14);
-  GFont f_small = fonts_get_system_font(FONT_KEY_GOTHIC_14);
   GColor bg = bg_color();
   graphics_context_set_fill_color(ctx, bg);
   graphics_fill_rect(ctx, b, 0, GCornerNone);
-  GColor sub = PBL_IF_COLOR_ELSE(gcolor_equal(bg, GColorBlack) ? GColorLightGray : GColorWhite, GColorWhite);
 
-  // ---- cover
-  int cy = PBL_IF_ROUND_ELSE(H * 10 / 100, big ? 12 : 8);
-  GRect cr = GRect((W - S) / 2, cy, S, S);
-#if defined(PBL_COLOR)
-  graphics_context_set_fill_color(ctx, GColorBlack);           // drop shadow
-  graphics_fill_rect(ctx, GRect(cr.origin.x + 3, cr.origin.y + 4, S, S), 4, GCornersAll);
-#endif
+  // ---- cover: full width (rectangles) or the whole dial (round)
+  GRect cr = GRect((W - S) / 2, 0, S, S);
   if (s_art) {
     graphics_context_set_compositing_mode(ctx, GCompOpAssign);
     graphics_draw_bitmap_in_rect(ctx, s_art, cr);
-#if !defined(PBL_COLOR)
-    graphics_context_set_stroke_color(ctx, GColorWhite);
-    graphics_draw_rect(ctx, grect_inset(cr, GEdgeInsets(-2)));
-#endif
-  } else draw_note(ctx, cr);
+  } else draw_note(ctx, GRect(W / 2 - S / 4, S / 2 - S / 4 - PBL_IF_ROUND_ELSE(S / 10, 0), S / 2, S / 2));
 
-  // ---- overlay glyph on the cover after a button press
-  if (s_overlay) {
-    GPoint c = grect_center_point(&cr);
-    int r = S / 5;
+  // ---- what the text band says
+  int32_t pos = s_pos > s_dur && s_dur > 0 ? s_dur : s_pos;
+  int pct = s_vol_mode ? (s_vol < 0 ? 0 : s_vol) : (s_dur > 0 ? (int)((int64_t)pos * 100 / s_dur) : 0);
+  const char *line = !s_has_song ? "Play music on your phone" : s_title;
+  if (s_has_song && s_artist[0] && (time(NULL) / 4) % 2) line = s_artist;      // title and artist take turns
+  static char vb[24];
+  if (s_vol_mode) { snprintf(vb, sizeof(vb), "Volume  %d%%", s_vol < 0 ? 0 : s_vol); line = vb; }
+  if (s_rate_mode) line = "Like - Info - Dislike";
+  char tm[12]; fmt_time(tm, sizeof(tm), pos);
+  GColor barc = s_vol_mode ? PBL_IF_COLOR_ELSE(GColorChromeYellow, GColorWhite) : GColorWhite;
+
+#if defined(PBL_ROUND)
+  int band = H * 72 / 100;
+  graphics_context_set_fill_color(ctx, bg);
+  graphics_fill_rect(ctx, GRect(0, band, W, H - band), 0, GCornerNone);
+  graphics_context_set_text_color(ctx, GColorWhite);
+  graphics_draw_text(ctx, line, fonts_get_system_font(big ? FONT_KEY_GOTHIC_24_BOLD : FONT_KEY_GOTHIC_18_BOLD),
+                     GRect(W / 6, band, W * 2 / 3, big ? 30 : 24), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  if (s_has_song && !s_vol_mode && !s_rate_mode)
+    graphics_draw_text(ctx, tm, fonts_get_system_font(FONT_KEY_GOTHIC_14), GRect(0, band + (big ? 28 : 22), W, 18),
+                       GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+  GRect rim = grect_inset(b, GEdgeInsets(2));                                   // progress ring on the rim
+  graphics_context_set_fill_color(ctx, GColorBlack);
+  graphics_fill_radial(ctx, rim, GOvalScaleModeFitCircle, 6, 0, DEG_TO_TRIGANGLE(360));
+  graphics_context_set_fill_color(ctx, barc);
+  if (s_has_song && pct > 0) graphics_fill_radial(ctx, rim, GOvalScaleModeFitCircle, 6, 0, DEG_TO_TRIGANGLE(360 * pct / 100));
+#else
+  // progress bar along the bottom edge of the cover
+  if (s_has_song) {
+    graphics_context_set_fill_color(ctx, GColorBlack);
+    graphics_fill_rect(ctx, GRect(0, S - 4, W, 4), 0, GCornerNone);
+    graphics_context_set_fill_color(ctx, barc);
+    graphics_fill_rect(ctx, GRect(0, S - 4, W * pct / 100, 4), 0, GCornerNone);
+  }
+  // text band under the cover
+  int band = S, bh = H - S;
+  bool show_t = s_has_song && !s_vol_mode && !s_rate_mode;
+  int tw = show_t ? (big ? 44 : 34) : 0;
+  graphics_context_set_text_color(ctx, GColorWhite);
+  graphics_draw_text(ctx, line, fonts_get_system_font(bh >= 28 ? FONT_KEY_GOTHIC_24_BOLD : FONT_KEY_GOTHIC_18_BOLD),
+                     GRect(4, band + (bh >= 28 ? -3 : -1), W - 8 - tw, bh + 4), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+  if (show_t) {
+    graphics_context_set_text_color(ctx, PBL_IF_COLOR_ELSE(GColorLightGray, GColorWhite));
+    graphics_draw_text(ctx, tm, fonts_get_system_font(big ? FONT_KEY_GOTHIC_18 : FONT_KEY_GOTHIC_14),
+                       GRect(W - tw - 4, band + (bh - (big ? 22 : 18)) / 2, tw, 22), GTextOverflowModeFill, GTextAlignmentRight, NULL);
+  }
+#endif
+
+  // ---- liked / disliked badge, top-left of the cover
+  if (s_has_song && s_liked && !s_overlay) {
+    int rr = big ? 13 : 10;
+    GPoint c = GPoint(cr.origin.x + PBL_IF_ROUND_ELSE(W / 4, rr + 5), PBL_IF_ROUND_ELSE(H / 4, rr + 5));
+    graphics_context_set_fill_color(ctx, s_liked > 0 ? PBL_IF_COLOR_ELSE(GColorIslamicGreen, GColorWhite) : PBL_IF_COLOR_ELSE(GColorDarkCandyAppleRed, GColorWhite));
+    graphics_fill_circle(ctx, c, rr);
+    graphics_context_set_fill_color(ctx, PBL_IF_COLOR_ELSE(GColorWhite, GColorBlack));
+    draw_icon(ctx, s_liked > 0 ? OV_LIKE : OV_DISLIKE, c, rr - 1);
+  }
+
+  // ---- big glyph in the middle of the cover: after a press, or while paused
+  int ov = s_overlay ? s_overlay : (s_has_song && !s_playing ? OV_PAUSE : OV_NONE);
+  if (ov) {
+    GPoint c = GPoint(W / 2, PBL_IF_ROUND_ELSE(H * 38 / 100, S / 2));
+    int r = s_overlay ? S / 6 : S / 9;
     graphics_context_set_fill_color(ctx, GColorBlack);
     graphics_fill_circle(ctx, c, r + 2);
     graphics_context_set_stroke_color(ctx, GColorWhite);
     graphics_context_set_stroke_width(ctx, 2);
     graphics_draw_circle(ctx, c, r);
     graphics_context_set_fill_color(ctx, GColorWhite);
-    draw_icon(ctx, s_overlay, c, r);
+    draw_icon(ctx, ov, c, r);
   }
 
-  // ---- title / artist
-  int pad = PBL_IF_ROUND_ELSE(W / 8, 6), y = cy + S + (big ? 10 : 6);
-  int tw = W - 2 * pad - PBL_IF_ROUND_ELSE(W / 8, big ? 18 : 14);   // leave room for the button icons
-  graphics_context_set_text_color(ctx, GColorWhite);
-  graphics_draw_text(ctx, s_has_song ? s_title : "Nothing playing", f_title, GRect(pad, y - 4, tw, big ? 30 : 24),
-                     GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-  y += big ? 26 : 20;
-  graphics_context_set_text_color(ctx, sub);
-  graphics_draw_text(ctx, s_rate_mode ? "Like  -  Info  -  Dislike" : s_has_song ? s_artist : "Play music on your phone", f_artist, GRect(pad, y - 2, tw, big ? 24 : 18),
-                     GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-
-  // ---- progress (bar on rectangles, rim arc on round) or volume
-  int32_t pos = s_pos > s_dur && s_dur > 0 ? s_dur : s_pos;
-  int pct = s_vol_mode ? (s_vol < 0 ? 50 : s_vol) : (s_dur > 0 ? (int)((int64_t)pos * 1000 / s_dur) / 10 : 0);
-  char tl[12], tr[12];
-  fmt_time(tl, sizeof(tl), pos); fmt_time(tr, sizeof(tr), s_dur);
-  if (s_vol_mode) { snprintf(tl, sizeof(tl), "VOL"); snprintf(tr, sizeof(tr), "%d%%", s_vol < 0 ? 0 : s_vol); }
-#if defined(PBL_ROUND)
-  GRect rim = grect_inset(b, GEdgeInsets(3));
-  graphics_context_set_fill_color(ctx, PBL_IF_COLOR_ELSE(GColorBlack, GColorDarkGray));
-  graphics_fill_radial(ctx, rim, GOvalScaleModeFitCircle, 6, DEG_TO_TRIGANGLE(0), DEG_TO_TRIGANGLE(360));
-  graphics_context_set_fill_color(ctx, s_vol_mode ? PBL_IF_COLOR_ELSE(GColorChromeYellow, GColorWhite) : GColorWhite);
-  if (pct > 0) graphics_fill_radial(ctx, rim, GOvalScaleModeFitCircle, 6, 0, DEG_TO_TRIGANGLE(360 * pct / 100));
-  if (s_has_song) {
-    char both[28]; snprintf(both, sizeof(both), "%s  %s %s", tl, s_vol_mode ? "" : "/", tr);
-    graphics_context_set_text_color(ctx, sub);
-    graphics_draw_text(ctx, both, f_small, GRect(0, H - (big ? 44 : 32), W, 18), GTextOverflowModeFill, GTextAlignmentCenter, NULL);
-  }
-#else
-  if (s_has_song) {
-    int by = H - (big ? 22 : 16), tx = big ? 46 : 36;
-    graphics_context_set_text_color(ctx, sub);
-    graphics_draw_text(ctx, tl, f_small, GRect(2, by - 9, tx - 4, 18), GTextOverflowModeFill, GTextAlignmentRight, NULL);
-    graphics_draw_text(ctx, tr, f_small, GRect(W - tx + 2, by - 9, tx - 4, 18), GTextOverflowModeFill, GTextAlignmentLeft, NULL);
-    GRect track = GRect(tx, by - 1, W - 2 * tx, 4);
-    graphics_context_set_fill_color(ctx, PBL_IF_COLOR_ELSE(GColorBlack, GColorDarkGray));
-    graphics_fill_rect(ctx, track, 2, GCornersAll);
-    graphics_context_set_fill_color(ctx, s_vol_mode ? PBL_IF_COLOR_ELSE(GColorChromeYellow, GColorWhite) : GColorWhite);
-    int fw = track.size.w * pct / 100;
-    if (fw > 0) graphics_fill_rect(ctx, GRect(track.origin.x, track.origin.y, fw, 4), 2, GCornersAll);
-    if (!s_vol_mode) graphics_fill_circle(ctx, GPoint(track.origin.x + fw, track.origin.y + 1), 3);
-  }
-#endif
-  // button hints at the right edge, next to the physical buttons
-  {
-    int hx = W - PBL_IF_ROUND_ELSE(W / 7, big ? 12 : 10), r = big ? 6 : 5;
-    int ys[3] = { H * 30 / 100, H / 2, H * 70 / 100 };
-    int kinds[3] = { OV_PREV, s_playing ? OV_PAUSE : OV_PLAY, OV_NEXT };
-    if (s_rate_mode) { kinds[0] = OV_LIKE; kinds[1] = OV_INFO; kinds[2] = OV_DISLIKE; }
-    graphics_context_set_fill_color(ctx, s_rate_mode ? GColorWhite : sub);
-    if (s_rate_mode) r += 2;
-    for (int i = 0; i < 3; i++) draw_icon(ctx, kinds[i], GPoint(hx, ys[i]), r * 2);
-  }
-  if (s_has_song && s_liked && !s_overlay) {        // liked / disliked badge, top-left of the cover
-    GPoint c = GPoint(cr.origin.x + 12, cr.origin.y + 12);
-    graphics_context_set_fill_color(ctx, s_liked > 0 ? PBL_IF_COLOR_ELSE(GColorIslamicGreen, GColorWhite) : PBL_IF_COLOR_ELSE(GColorDarkCandyAppleRed, GColorWhite));
-    graphics_fill_circle(ctx, c, 9);
-    graphics_context_set_fill_color(ctx, PBL_IF_COLOR_ELSE(GColorWhite, GColorBlack));
-    draw_icon(ctx, s_liked > 0 ? OV_LIKE : OV_DISLIKE, c, 8);
-  }
-  // little play-state dot under the cover when paused
-  if (s_has_song && !s_playing && !s_overlay) {
-    GPoint c = GPoint(cr.origin.x + S - 12, cr.origin.y + S - 12);
-    graphics_context_set_fill_color(ctx, GColorBlack);
-    graphics_fill_circle(ctx, c, 9);
-    graphics_context_set_fill_color(ctx, GColorWhite);
-    draw_icon(ctx, OV_PAUSE, c, 7);
-  }
+  // ---- big button tabs at the right edge, next to Up / Select / Down
+  int kinds[3] = { OV_PREV, s_playing ? OV_PAUSE : OV_PLAY, OV_NEXT };
+  if (s_rate_mode) { kinds[0] = OV_LIKE; kinds[1] = OV_INFO; kinds[2] = OV_DISLIKE; }
+  if (s_vol_mode) { kinds[0] = OV_PLUS; kinds[2] = OV_MINUS; }
+  int ys[3] = { H * PBL_IF_ROUND_ELSE(30, 27) / 100, H / 2, H * PBL_IF_ROUND_ELSE(70, 73) / 100 };
+  for (int i = 0; i < 3; i++) edge_tab(ctx, b, ys[i], kinds[i], big);
 }
 
 // ------------------------------------------------------------------ buttons
@@ -230,7 +238,7 @@ static void show_overlay(int k) {
 static void vol_end(void *d) { s_vol_timer = NULL; s_vol_mode = false; layer_mark_dirty(s_canvas); }
 static void vol_touch(void) {
   s_vol_mode = true;
-  if (s_vol_timer) app_timer_reschedule(s_vol_timer, 1500); else s_vol_timer = app_timer_register(1500, vol_end, NULL);
+  if (s_vol_timer) app_timer_reschedule(s_vol_timer, 2000); else s_vol_timer = app_timer_register(2000, vol_end, NULL);
   layer_mark_dirty(s_canvas);
 }
 // Up = previous, Select = play/pause, Down = next.
@@ -238,15 +246,13 @@ static void vol_touch(void) {
 static AppTimer *s_hold_timer;
 static int s_hold_cmd;
 static void vol_step(void) {
-  send_cmd(s_hold_cmd);
-  if (s_vol >= 0) { s_vol += s_hold_cmd == CMD_VOL_UP ? 7 : -7; if (s_vol > 100) s_vol = 100; if (s_vol < 0) s_vol = 0; }
+  send_cmd(s_hold_cmd);     // the phone answers with the real volume
   vol_touch();
 }
-static void hold_tick(void *d) { vol_step(); s_hold_timer = app_timer_register(250, hold_tick, NULL); }
+static void hold_tick(void *d) { vol_step(); s_hold_timer = app_timer_register(350, hold_tick, NULL); }
 static void hold_start(ClickRecognizerRef r, void *c) {
   if (s_rate_mode) return;
   s_hold_cmd = click_recognizer_get_button_id(r) == BUTTON_ID_UP ? CMD_VOL_UP : CMD_VOL_DOWN;
-  vibes_short_pulse();
   hold_tick(NULL);
 }
 static void hold_end(ClickRecognizerRef r, void *c) { if (s_hold_timer) { app_timer_cancel(s_hold_timer); s_hold_timer = NULL; } }
@@ -336,6 +342,7 @@ static void inbox(DictionaryIterator *it, void *ctx) {
     Tuple *len = dict_find(it, MESSAGE_KEY_ART_LEN), *off = dict_find(it, MESSAGE_KEY_ART_OFF), *dat = dict_find(it, MESSAGE_KEY_ART_DATA);
     if (len) {                                   // header: start a new cover (0 = no cover)
       if (s_art_new) { gbitmap_destroy(s_art_new); s_art_new = NULL; }
+      if (s_art) { gbitmap_destroy(s_art); s_art = NULL; }
       s_art_id = id->value->int32; s_art_len = len->value->int32; s_art_got = 0;
       if (s_art_len == 0) { if (s_art) { gbitmap_destroy(s_art); s_art = NULL; } }
       else {
@@ -357,7 +364,8 @@ static void inbox(DictionaryIterator *it, void *ctx) {
   layer_mark_dirty(s_canvas);
 }
 static void tick(struct tm *t, TimeUnits u) {
-  if (s_playing && s_has_song && s_dur > 0) { s_pos += 1000; if (s_pos > s_dur) s_pos = s_dur; layer_mark_dirty(s_canvas); }
+  if (s_playing && s_has_song && s_dur > 0) { s_pos += 1000; if (s_pos > s_dur) s_pos = s_dur; }
+  if (s_has_song) layer_mark_dirty(s_canvas);
 }
 
 #ifdef KMUSIC_DEMO
@@ -389,7 +397,7 @@ static void demo(void) {
 static void win_load(Window *w) {
   Layer *root = window_get_root_layer(w);
   GRect b = layer_get_bounds(root);
-  s_S = PBL_IF_ROUND_ELSE(b.size.w * 45 / 100, b.size.w * 62 / 100) & ~3;   // 88 / 124 / 88 / 128
+  s_S = b.size.w;   // cover is as wide as the screen
   s_canvas = layer_create(b);
   layer_set_update_proc(s_canvas, canvas_draw);
   layer_add_child(root, s_canvas);
