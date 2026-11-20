@@ -1,0 +1,26 @@
+{
+  "name": "kmusic",
+  "author": "Kherve",
+  "version": "1.0.0",
+  "keywords": ["pebble-app"],
+  "private": true,
+  "dependencies": {},
+  "pebble": {
+    "displayName": "kMusic",
+    "uuid": "a445a243-adbe-49b0-86cf-51b8aa7e59b2",
+    "sdkVersion": "3",
+    "enableMultiJS": false,
+    "targetPlatforms": ["aplite", "basalt", "chalk", "diorite", "emery", "flint", "gabbro"],
+    "watchapp": { "watchface": false },
+    "messageKeys": {
+      "CMD": 0, "TITLE": 1, "ARTIST": 2, "ALBUM": 3, "STATE": 4, "POS": 5, "DUR": 6,
+      "VOL": 7, "PLAYER": 8, "ART_W": 9, "ART_ROW": 10, "ART_LEN": 11, "ART_ID": 12,
+      "ART_OFF": 13, "ART_DATA": 14, "ACCENT": 15, "COLOR": 16, "LIKED": 17, "INFO": 18
+    },
+    "resources": {
+      "media": [
+        { "type": "bitmap", "name": "IMAGE_MENU_ICON", "file": "images/menu_icon.png", "menuIcon": true }
+      ]
+    }
+  }
+}

@@ -1,0 +1,7 @@
+build/
+*.pbw
+.gradle/
+android/build/
+android/app/build/
+local.properties
+.DS_Store
