@@ -17,7 +17,9 @@ static char s_title[72], s_artist[56], s_player[24];
 static bool s_has_song, s_playing, s_vol_mode, s_rate_mode;
 static int s_liked;               // 1 liked, -1 disliked, 0 none
 static AppTimer *s_rate_timer;
-static char s_info[600];          // album, year, genre, track n of m, player...
+static char s_info[600];
+static bool s_phone_ok, s_waited;   // companion answered? / waited long enough to say so
+static void waited(void *d);          // album, year, genre, track n of m, player...
 static Window *s_info_win;
 static ScrollLayer *s_info_scroll;
 static TextLayer *s_info_head, *s_info_text;
@@ -148,8 +150,8 @@ static void canvas_draw(Layer *l, GContext *ctx) {
   // ---- text
   int32_t pos = s_pos > s_dur && s_dur > 0 ? s_dur : s_pos;
   int pct = s_vol_mode ? (s_vol < 0 ? 0 : s_vol) : (s_dur > 0 ? (int)((int64_t)pos * 100 / s_dur) : 0);
-  const char *l1 = s_has_song ? s_title : "Nothing playing";
-  const char *l2 = s_has_song ? s_artist : "Play music on your phone";
+  const char *l1 = s_has_song ? s_title : s_phone_ok ? "Nothing playing" : s_waited ? "Get the companion" : "Connecting...";
+  const char *l2 = s_has_song ? s_artist : s_phone_ok ? "Play music on your phone" : s_waited ? "github.com/gkerherve/kMusic" : "";
   static char vb[24];
   if (s_vol_mode) { snprintf(vb, sizeof(vb), "Volume %d%%", s_vol < 0 ? 0 : s_vol); l2 = vb; }
   if (s_rate_mode) l2 = "Like, info or dislike";
@@ -159,7 +161,8 @@ static void canvas_draw(Layer *l, GContext *ctx) {
   GFont f2 = fonts_get_system_font(big ? FONT_KEY_GOTHIC_18 : FONT_KEY_GOTHIC_14);
 
 #if defined(PBL_ROUND)
-  int band = H * 70 / 100, tx = W / 7, tw = W - ACTION_BAR_WIDTH - tx - 2;
+  int band = H * 70 / 100, tx = W / 6, tw = W - ACTION_BAR_WIDTH - tx;
+  if (!s_has_song && !s_phone_ok && s_waited) { l1 = "App on GitHub:"; l2 = "gkerherve/kMusic"; }
   graphics_context_set_fill_color(ctx, bg);
   graphics_fill_rect(ctx, GRect(0, band, W, H - band), 0, GCornerNone);
   graphics_context_set_text_color(ctx, GColorWhite);
@@ -181,6 +184,13 @@ static void canvas_draw(Layer *l, GContext *ctx) {
     if (pct > 0) graphics_fill_rect(ctx, GRect(4, y, (S - 8) * pct / 100, 3), 1, GCornersAll);
   }
   y += big ? 2 : 1;
+  if (!s_has_song && !s_phone_ok && s_waited) {          // no companion yet: say where to get it
+    graphics_context_set_text_color(ctx, GColorWhite);
+    graphics_draw_text(ctx, "Phone app on GitHub:\ngkerherve/kMusic", fonts_get_system_font(big ? FONT_KEY_GOTHIC_18 : FONT_KEY_GOTHIC_14),
+                       GRect(4, y - 2, S - 6, H - y), GTextOverflowModeWordWrap, GTextAlignmentLeft, NULL);
+    update_icons();
+    return;
+  }
   graphics_context_set_text_color(ctx, GColorWhite);
   graphics_draw_text(ctx, l1, f1, GRect(4, y, S - 6, big ? 30 : 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
   y += big ? 26 : 20;
@@ -263,7 +273,8 @@ static void info_load(Window *w) {
     scroll_layer_add_child(s_info_scroll, text_layer_get_layer(ls[i]));
   }
   text_layer_set_font(s_info_head, fh); text_layer_set_text(s_info_head, s_has_song ? s_title : "Nothing playing");
-  text_layer_set_font(s_info_text, ft); text_layer_set_text(s_info_text, s_info[0] ? s_info : "No details from the player.");
+  text_layer_set_font(s_info_text, ft); text_layer_set_text(s_info_text, s_info[0] ? s_info : s_phone_ok ? "No details from the player." :
+    "kMusic needs its free Android companion app. Download it from:\n\ngithub.com/gkerherve/kMusic\n\nInstall it, follow its setup steps, then play some music.");
   scroll_layer_set_content_size(s_info_scroll, GSize(b.size.w, y));
   layer_add_child(root, scroll_layer_get_layer(s_info_scroll));
 }
@@ -308,6 +319,7 @@ static void copy_str(DictionaryIterator *it, uint32_t key, char *dst, size_t n) 
   if (t) { strncpy(dst, t->value->cstring, n - 1); dst[n - 1] = 0; }
 }
 static void inbox(DictionaryIterator *it, void *ctx) {
+  s_phone_ok = true;
   Tuple *t;
   if (dict_find(it, MESSAGE_KEY_TITLE)) {
     copy_str(it, MESSAGE_KEY_TITLE, s_title, sizeof(s_title));
@@ -409,6 +421,8 @@ static void win_unload(Window *w) {
   layer_destroy(s_canvas);
 }
 
+static void waited(void *d) { s_waited = true; if (s_canvas) layer_mark_dirty(s_canvas); }
+
 int main(void) {
   s_accent = PBL_IF_COLOR_ELSE(GColorOxfordBlue, GColorBlack);
   s_info_win = window_create();
@@ -424,6 +438,7 @@ int main(void) {
   demo();
 #else
   s_hello_timer = app_timer_register(300, hello_retry, NULL);
+  app_timer_register(6000, waited, NULL);
 #endif
   app_event_loop();
   if (s_art) gbitmap_destroy(s_art);

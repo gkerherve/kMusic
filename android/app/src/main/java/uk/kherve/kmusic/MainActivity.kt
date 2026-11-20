@@ -20,17 +20,16 @@ import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.TextView
-import java.util.Locale
 
 /**
  * Setup screen. Sideloaded apps on Android 13+ get "Restricted setting" when asking for
  * notification access, so this walks the user through every step, with a button for each
- * and a green tick once it's done. French or English, following the phone's language.
+ * and a green tick once it's done. English only.
  */
 class MainActivity : Activity() {
 
-    private val fr = Locale.getDefault().language == "fr"
-    private fun t(en: String, frText: String) = if (fr) frText else en
+    @Suppress("UNUSED_PARAMETER")
+    private fun t(en: String, unused: String) = en        // English only
 
     private lateinit var steps: LinearLayout
     private lateinit var status: TextView
@@ -78,6 +77,11 @@ class MainActivity : Activity() {
             "Up  -  previous\nSelect  -  play / pause\nDown  -  next\nHold Up / Down  -  volume\nHold Select  -  like, info (up next), dislike",
             "Haut  -  précédent\nSelect  -  lecture / pause\nBas  -  suivant\nMaintenir Haut / Bas  -  volume\nMaintenir Select  -  j'aime, infos (à suivre), je n'aime pas"),
             16f, Color.parseColor("#EDE3F3")).also { it.setLineSpacing(0f, 1.3f) })
+
+        root.addView(text("Updates and source: github.com/gkerherve/kMusic", 14f, Color.parseColor("#B9A5C7"), center = true).also {
+            it.setPadding(0, px(28), 0, 0)
+            it.setOnClickListener { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/gkerherve/kMusic/releases/latest"))) }
+        })
 
         setContentView(ScrollView(this).apply {
             isFillViewport = true
