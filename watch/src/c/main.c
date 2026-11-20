@@ -115,22 +115,18 @@ static void draw_note(GContext *ctx, GRect r) {   // placeholder cover: a music 
   graphics_fill_rect(ctx, GRect(x + s * 36 / 100 + s / 10 - 3, y + s * 18 / 100, s * 30 / 100 + 3, s / 12 + 1), 0, GCornerNone);
 }
 
-// Big glyph on a black tab that sticks out of the screen edge, right next to a physical button.
-static void edge_tab(GContext *ctx, GRect b, int y, int kind, bool big) {
-  int R = big ? 26 : 20, g = big ? 13 : 10;
-#if defined(PBL_ROUND)
-  int r = b.size.w / 2, dy = y - b.size.h / 2, ex = b.size.w / 2;
-  for (int x = 0; x <= r; x++) if (x * x + dy * dy <= r * r) ex = b.size.w / 2 + x;   // rim x at this y
-#else
-  int ex = b.size.w;
-#endif
-  graphics_context_set_fill_color(ctx, GColorBlack);
-  graphics_fill_circle(ctx, GPoint(ex + 4, y), R);
-  graphics_context_set_stroke_color(ctx, PBL_IF_COLOR_ELSE(GColorDarkGray, GColorWhite));
-  graphics_context_set_stroke_width(ctx, 1);
-  graphics_draw_circle(ctx, GPoint(ex + 4, y), R);
-  graphics_context_set_fill_color(ctx, GColorWhite);
-  draw_icon(ctx, kind, GPoint(ex - (R - 4) / 2 - 1, y), g);   // centred in the visible part of the tab
+// ---- action bar (like Pebble's own Music app): icons follow the current mode
+static ActionBarLayer *s_bar;
+static GBitmap *s_ic_play, *s_ic_pause, *s_ic_next, *s_ic_prev, *s_ic_vup, *s_ic_vdn, *s_ic_like, *s_ic_dislike, *s_ic_info;
+static void update_icons(void) {
+  if (!s_bar) return;
+  GBitmap *up = s_ic_prev, *mid = s_playing ? s_ic_pause : s_ic_play, *dn = s_ic_next;
+  if (s_vol_mode) { up = s_ic_vup; dn = s_ic_vdn; }
+  if (s_rate_mode) { up = s_ic_like; mid = s_ic_info; dn = s_ic_dislike; }
+  static GBitmap *last[3];                      // only touch the bar when an icon really changes
+  GBitmap *now[3] = { up, mid, dn };
+  ButtonId ids[3] = { BUTTON_ID_UP, BUTTON_ID_SELECT, BUTTON_ID_DOWN };
+  for (int i = 0; i < 3; i++) if (now[i] != last[i]) { action_bar_layer_set_icon_animated(s_bar, ids[i], now[i], last[i] != NULL); last[i] = now[i]; }
 }
 
 static void canvas_draw(Layer *l, GContext *ctx) {
@@ -138,68 +134,64 @@ static void canvas_draw(Layer *l, GContext *ctx) {
   int W = b.size.w, H = b.size.h, S = s_S;
   bool big = W >= 200;
   GColor bg = bg_color();
+  (void)H;
   graphics_context_set_fill_color(ctx, bg);
   graphics_fill_rect(ctx, b, 0, GCornerNone);
 
-  // ---- cover: full width (rectangles) or the whole dial (round)
-  GRect cr = GRect((W - S) / 2, 0, S, S);
+  // ---- cover: beside the action bar (rectangles) or the whole dial (round)
+  GRect cr = GRect(0, 0, S, S);
   if (s_art) {
     graphics_context_set_compositing_mode(ctx, GCompOpAssign);
     graphics_draw_bitmap_in_rect(ctx, s_art, cr);
-  } else draw_note(ctx, GRect(W / 2 - S / 4, S / 2 - S / 4 - PBL_IF_ROUND_ELSE(S / 10, 0), S / 2, S / 2));
+  } else draw_note(ctx, GRect(S / 4, S / 4 - PBL_IF_ROUND_ELSE(S / 10, 0), S / 2, S / 2));
 
-  // ---- what the text band says
+  // ---- text
   int32_t pos = s_pos > s_dur && s_dur > 0 ? s_dur : s_pos;
   int pct = s_vol_mode ? (s_vol < 0 ? 0 : s_vol) : (s_dur > 0 ? (int)((int64_t)pos * 100 / s_dur) : 0);
-  const char *line = !s_has_song ? "Play music on your phone" : s_title;
-  if (s_has_song && s_artist[0] && (time(NULL) / 4) % 2) line = s_artist;      // title and artist take turns
+  const char *l1 = s_has_song ? s_title : "Nothing playing";
+  const char *l2 = s_has_song ? s_artist : "Play music on your phone";
   static char vb[24];
-  if (s_vol_mode) { snprintf(vb, sizeof(vb), "Volume  %d%%", s_vol < 0 ? 0 : s_vol); line = vb; }
-  if (s_rate_mode) line = "Like - Info - Dislike";
-  char tm[12]; fmt_time(tm, sizeof(tm), pos);
+  if (s_vol_mode) { snprintf(vb, sizeof(vb), "Volume %d%%", s_vol < 0 ? 0 : s_vol); l2 = vb; }
+  if (s_rate_mode) l2 = "Like, info or dislike";
   GColor barc = s_vol_mode ? PBL_IF_COLOR_ELSE(GColorChromeYellow, GColorWhite) : GColorWhite;
+  GColor sub = PBL_IF_COLOR_ELSE(s_vol_mode || s_rate_mode ? GColorChromeYellow : GColorLightGray, GColorWhite);
+  GFont f1 = fonts_get_system_font(big ? FONT_KEY_GOTHIC_24_BOLD : FONT_KEY_GOTHIC_18_BOLD);
+  GFont f2 = fonts_get_system_font(big ? FONT_KEY_GOTHIC_18 : FONT_KEY_GOTHIC_14);
 
 #if defined(PBL_ROUND)
-  int band = H * 72 / 100;
+  int band = H * 70 / 100, tx = W / 7, tw = W - ACTION_BAR_WIDTH - tx - 2;
   graphics_context_set_fill_color(ctx, bg);
   graphics_fill_rect(ctx, GRect(0, band, W, H - band), 0, GCornerNone);
   graphics_context_set_text_color(ctx, GColorWhite);
-  graphics_draw_text(ctx, line, fonts_get_system_font(big ? FONT_KEY_GOTHIC_24_BOLD : FONT_KEY_GOTHIC_18_BOLD),
-                     GRect(W / 6, band, W * 2 / 3, big ? 30 : 24), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-  if (s_has_song && !s_vol_mode && !s_rate_mode)
-    graphics_draw_text(ctx, tm, fonts_get_system_font(FONT_KEY_GOTHIC_14), GRect(0, band + (big ? 28 : 22), W, 18),
-                       GTextOverflowModeFill, GTextAlignmentCenter, NULL);
+  graphics_draw_text(ctx, l1, f1, GRect(tx, band - 2, tw, big ? 30 : 24), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
+  graphics_context_set_text_color(ctx, sub);
+  graphics_draw_text(ctx, l2, f2, GRect(tx, band + (big ? 24 : 18), tw, 20), GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
   GRect rim = grect_inset(b, GEdgeInsets(2));                                   // progress ring on the rim
   graphics_context_set_fill_color(ctx, GColorBlack);
   graphics_fill_radial(ctx, rim, GOvalScaleModeFitCircle, 6, 0, DEG_TO_TRIGANGLE(360));
   graphics_context_set_fill_color(ctx, barc);
   if (s_has_song && pct > 0) graphics_fill_radial(ctx, rim, GOvalScaleModeFitCircle, 6, 0, DEG_TO_TRIGANGLE(360 * pct / 100));
 #else
-  // progress bar along the bottom edge of the cover
-  if (s_has_song) {
-    graphics_context_set_fill_color(ctx, GColorBlack);
-    graphics_fill_rect(ctx, GRect(0, S - 4, W, 4), 0, GCornerNone);
+  // progress bar under the cover, then title and artist
+  int y = S + 3;
+  if (s_has_song || s_vol_mode) {
+    graphics_context_set_fill_color(ctx, PBL_IF_COLOR_ELSE(GColorBlack, GColorDarkGray));
+    graphics_fill_rect(ctx, GRect(4, y, S - 8, 3), 1, GCornersAll);
     graphics_context_set_fill_color(ctx, barc);
-    graphics_fill_rect(ctx, GRect(0, S - 4, W * pct / 100, 4), 0, GCornerNone);
+    if (pct > 0) graphics_fill_rect(ctx, GRect(4, y, (S - 8) * pct / 100, 3), 1, GCornersAll);
   }
-  // text band under the cover
-  int band = S, bh = H - S;
-  bool show_t = s_has_song && !s_vol_mode && !s_rate_mode;
-  int tw = show_t ? (big ? 44 : 34) : 0;
+  y += big ? 2 : 1;
   graphics_context_set_text_color(ctx, GColorWhite);
-  graphics_draw_text(ctx, line, fonts_get_system_font(bh >= 28 ? FONT_KEY_GOTHIC_24_BOLD : FONT_KEY_GOTHIC_18_BOLD),
-                     GRect(4, band + (bh >= 28 ? -3 : -1), W - 8 - tw, bh + 4), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
-  if (show_t) {
-    graphics_context_set_text_color(ctx, PBL_IF_COLOR_ELSE(GColorLightGray, GColorWhite));
-    graphics_draw_text(ctx, tm, fonts_get_system_font(big ? FONT_KEY_GOTHIC_18 : FONT_KEY_GOTHIC_14),
-                       GRect(W - tw - 4, band + (bh - (big ? 22 : 18)) / 2, tw, 22), GTextOverflowModeFill, GTextAlignmentRight, NULL);
-  }
+  graphics_draw_text(ctx, l1, f1, GRect(4, y, S - 6, big ? 30 : 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+  y += big ? 26 : 20;
+  graphics_context_set_text_color(ctx, sub);
+  graphics_draw_text(ctx, l2, f2, GRect(4, y, S - 6, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
 #endif
 
   // ---- liked / disliked badge, top-left of the cover
   if (s_has_song && s_liked && !s_overlay) {
     int rr = big ? 13 : 10;
-    GPoint c = GPoint(cr.origin.x + PBL_IF_ROUND_ELSE(W / 4, rr + 5), PBL_IF_ROUND_ELSE(H / 4, rr + 5));
+    GPoint c = GPoint(PBL_IF_ROUND_ELSE(W / 4, rr + 5), PBL_IF_ROUND_ELSE(H / 4, rr + 5));
     graphics_context_set_fill_color(ctx, s_liked > 0 ? PBL_IF_COLOR_ELSE(GColorIslamicGreen, GColorWhite) : PBL_IF_COLOR_ELSE(GColorDarkCandyAppleRed, GColorWhite));
     graphics_fill_circle(ctx, c, rr);
     graphics_context_set_fill_color(ctx, PBL_IF_COLOR_ELSE(GColorWhite, GColorBlack));
@@ -209,7 +201,7 @@ static void canvas_draw(Layer *l, GContext *ctx) {
   // ---- big glyph in the middle of the cover: after a press, or while paused
   int ov = s_overlay ? s_overlay : (s_has_song && !s_playing ? OV_PAUSE : OV_NONE);
   if (ov) {
-    GPoint c = GPoint(W / 2, PBL_IF_ROUND_ELSE(H * 38 / 100, S / 2));
+    GPoint c = GPoint(PBL_IF_ROUND_ELSE((W - ACTION_BAR_WIDTH / 2) / 2, S / 2), PBL_IF_ROUND_ELSE(H * 38 / 100, S / 2));
     int r = s_overlay ? S / 6 : S / 9;
     graphics_context_set_fill_color(ctx, GColorBlack);
     graphics_fill_circle(ctx, c, r + 2);
@@ -219,13 +211,7 @@ static void canvas_draw(Layer *l, GContext *ctx) {
     graphics_context_set_fill_color(ctx, GColorWhite);
     draw_icon(ctx, ov, c, r);
   }
-
-  // ---- big button tabs at the right edge, next to Up / Select / Down
-  int kinds[3] = { OV_PREV, s_playing ? OV_PAUSE : OV_PLAY, OV_NEXT };
-  if (s_rate_mode) { kinds[0] = OV_LIKE; kinds[1] = OV_INFO; kinds[2] = OV_DISLIKE; }
-  if (s_vol_mode) { kinds[0] = OV_PLUS; kinds[2] = OV_MINUS; }
-  int ys[3] = { H * PBL_IF_ROUND_ELSE(30, 27) / 100, H / 2, H * PBL_IF_ROUND_ELSE(70, 73) / 100 };
-  for (int i = 0; i < 3; i++) edge_tab(ctx, b, ys[i], kinds[i], big);
+  update_icons();
 }
 
 // ------------------------------------------------------------------ buttons
@@ -397,19 +383,37 @@ static void demo(void) {
 static void win_load(Window *w) {
   Layer *root = window_get_root_layer(w);
   GRect b = layer_get_bounds(root);
-  s_S = b.size.w;   // cover is as wide as the screen
+  s_S = PBL_IF_ROUND_ELSE(b.size.w, b.size.w - ACTION_BAR_WIDTH);   // cover fills the space beside the action bar
   s_canvas = layer_create(b);
   layer_set_update_proc(s_canvas, canvas_draw);
   layer_add_child(root, s_canvas);
+  s_ic_play = gbitmap_create_with_resource(RESOURCE_ID_IC_PLAY);
+  s_ic_pause = gbitmap_create_with_resource(RESOURCE_ID_IC_PAUSE);
+  s_ic_next = gbitmap_create_with_resource(RESOURCE_ID_IC_NEXT);
+  s_ic_prev = gbitmap_create_with_resource(RESOURCE_ID_IC_PREV);
+  s_ic_vup = gbitmap_create_with_resource(RESOURCE_ID_IC_VOL_UP);
+  s_ic_vdn = gbitmap_create_with_resource(RESOURCE_ID_IC_VOL_DOWN);
+  s_ic_like = gbitmap_create_with_resource(RESOURCE_ID_IC_LIKE);
+  s_ic_dislike = gbitmap_create_with_resource(RESOURCE_ID_IC_DISLIKE);
+  s_ic_info = gbitmap_create_with_resource(RESOURCE_ID_IC_INFO);
+  s_bar = action_bar_layer_create();
+  action_bar_layer_set_background_color(s_bar, GColorBlack);
+  action_bar_layer_set_click_config_provider(s_bar, click_config);
+  action_bar_layer_add_to_window(s_bar, w);
+  update_icons();
 }
-static void win_unload(Window *w) { layer_destroy(s_canvas); }
+static void win_unload(Window *w) {
+  action_bar_layer_destroy(s_bar); s_bar = NULL;   // icons cached in update_icons are re-set on next load
+  GBitmap *ics[9] = { s_ic_play, s_ic_pause, s_ic_next, s_ic_prev, s_ic_vup, s_ic_vdn, s_ic_like, s_ic_dislike, s_ic_info };
+  for (int i = 0; i < 9; i++) gbitmap_destroy(ics[i]);
+  layer_destroy(s_canvas);
+}
 
 int main(void) {
   s_accent = PBL_IF_COLOR_ELSE(GColorOxfordBlue, GColorBlack);
   s_info_win = window_create();
   window_set_window_handlers(s_info_win, (WindowHandlers){ .load = info_load, .unload = info_unload });
   s_win = window_create();
-  window_set_click_config_provider(s_win, click_config);
   window_set_window_handlers(s_win, (WindowHandlers){ .load = win_load, .unload = win_unload });
   window_stack_push(s_win, true);
   app_message_register_inbox_received(inbox);

@@ -1,7 +1,7 @@
 {
   "name": "kmusic",
   "author": "Kherve",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "keywords": ["pebble-app"],
   "private": true,
   "dependencies": {},
@@ -19,7 +19,16 @@
     },
     "resources": {
       "media": [
-        { "type": "bitmap", "name": "IMAGE_MENU_ICON", "file": "images/menu_icon.png", "menuIcon": true }
+        { "type": "bitmap", "name": "IMAGE_MENU_ICON", "file": "images/menu_icon.png", "menuIcon": true },
+        { "type": "bitmap", "name": "IC_PLAY", "file": "images/ic_play.png" },
+        { "type": "bitmap", "name": "IC_PAUSE", "file": "images/ic_pause.png" },
+        { "type": "bitmap", "name": "IC_NEXT", "file": "images/ic_next.png" },
+        { "type": "bitmap", "name": "IC_PREV", "file": "images/ic_prev.png" },
+        { "type": "bitmap", "name": "IC_VOL_UP", "file": "images/ic_vol_up.png" },
+        { "type": "bitmap", "name": "IC_VOL_DOWN", "file": "images/ic_vol_down.png" },
+        { "type": "bitmap", "name": "IC_LIKE", "file": "images/ic_like.png" },
+        { "type": "bitmap", "name": "IC_DISLIKE", "file": "images/ic_dislike.png" },
+        { "type": "bitmap", "name": "IC_INFO", "file": "images/ic_info.png" }
       ]
     }
   }
