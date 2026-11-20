@@ -11,6 +11,10 @@ import android.provider.Settings
 import android.view.Gravity
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.RadioButton
+import android.widget.RadioGroup
+import android.widget.ScrollView
+import android.content.res.ColorStateList
 import android.widget.TextView
 
 /** One screen: explains kMusic and asks for notification access (needed to read what's playing). */
@@ -43,6 +47,28 @@ class MainActivity : Activity() {
                    "Up  -  previous\nSelect  -  play / pause\nDown  -  next\nHold Up / Down  -  volume\nHold Select  -  like, info, dislike"
             textSize = 16f; setTextColor(Color.parseColor("#EDE3F3")); setLineSpacing(0f, 1.25f)
         })
+        // ---- which app to control
+        root.addView(TextView(this).apply {
+            text = "Control"; textSize = 20f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD
+            setPadding(0, (32 * dp).toInt(), 0, (6 * dp).toInt())
+        })
+        val prefs = getSharedPreferences("kmusic", MODE_PRIVATE)
+        val chosen = prefs.getString("player", "") ?: ""
+        val group = RadioGroup(this)
+        val tint = ColorStateList.valueOf(Color.WHITE)
+        fun option(label: String, pkg: String) {
+            group.addView(RadioButton(this).apply {
+                text = label; textSize = 17f; setTextColor(Color.parseColor("#EDE3F3")); buttonTintList = tint
+                setPadding((8 * dp).toInt(), (10 * dp).toInt(), 0, (10 * dp).toInt())
+                id = android.view.View.generateViewId()
+                isChecked = pkg == chosen
+                setOnClickListener { prefs.edit().putString("player", pkg).apply() }
+            })
+        }
+        option("Automatic  -  whatever is playing", "")
+        for ((label, pkg) in musicApps()) option(label, pkg)
+        root.addView(group)
+
         status = TextView(this).apply {
             textSize = 16f; typeface = Typeface.DEFAULT_BOLD; gravity = Gravity.CENTER
             setPadding(0, (36 * dp).toInt(), 0, (14 * dp).toInt())
@@ -60,7 +86,24 @@ class MainActivity : Activity() {
             textSize = 14f; setTextColor(Color.parseColor("#B9A5C7")); gravity = Gravity.CENTER
             setPadding(0, (18 * dp).toInt(), 0, 0)
         })
-        setContentView(root)
+        setContentView(ScrollView(this).apply {
+            isFillViewport = true
+            background = root.background
+            addView(root)
+        })
+    }
+
+    /** Installed apps that can play media (they offer a media browser or handle media buttons). */
+    private fun musicApps(): List<Pair<String, String>> {
+        val pm = packageManager
+        val pkgs = LinkedHashSet<String>()
+        pm.queryIntentServices(Intent("android.media.browse.MediaBrowserService"), 0).forEach { pkgs += it.serviceInfo.packageName }
+        pm.queryBroadcastReceivers(Intent(Intent.ACTION_MEDIA_BUTTON), 0).forEach { pkgs += it.activityInfo.packageName }
+        pkgs -= packageName
+        return pkgs.mapNotNull { p ->
+            try { pm.getApplicationLabel(pm.getApplicationInfo(p, 0)).toString() to p } catch (_: Exception) { null }
+        }.filter { pm.getLaunchIntentForPackage(it.second) != null }      // only apps you can open
+         .sortedBy { it.first.lowercase() }
     }
 
     override fun onResume() {

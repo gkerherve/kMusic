@@ -56,18 +56,28 @@ class MusicService : NotificationListenerService() {
         val me = ComponentName(this, MusicService::class.java)
         msm.addOnActiveSessionsChangedListener(sessionsListener, me, main)
         pickController(msm.getActiveSessions(me))
+        prefs().registerOnSharedPreferenceChangeListener(prefListener)
+    }
+
+    private fun prefs() = getSharedPreferences("kmusic", MODE_PRIVATE)
+    private val prefListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == "player") { ctrl?.unregisterCallback(cb); ctrl = null; pickController(null) }
     }
 
     override fun onListenerDisconnected() {
         running = false
         try { msm.removeOnActiveSessionsChangedListener(sessionsListener) } catch (_: Exception) {}
+        prefs().unregisterOnSharedPreferenceChangeListener(prefListener)
         ctrl?.unregisterCallback(cb)
         link.stop()
     }
 
     private fun pickController(list: List<MediaController>?) {
         val all = list ?: try { msm.getActiveSessions(ComponentName(this, MusicService::class.java)) } catch (_: Exception) { emptyList() }
-        val best = all.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING } ?: all.firstOrNull()
+        // "player" = package chosen in the kMusic app, or empty for automatic (whatever is playing)
+        val chosen = prefs().getString("player", "") ?: ""
+        val pool = if (chosen.isEmpty()) all else all.filter { it.packageName == chosen }
+        val best = pool.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING } ?: pool.firstOrNull()
         if (best?.sessionToken == ctrl?.sessionToken) return
         ctrl?.unregisterCallback(cb)
         ctrl = best
