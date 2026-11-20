@@ -46,6 +46,7 @@ class MusicService : NotificationListenerService() {
         override fun onMetadataChanged(m: MediaMetadata?) { pushAll(false) }
         override fun onPlaybackStateChanged(s: PlaybackState?) { pushState() }
         override fun onSessionDestroyed() { pickController(null) }
+        override fun onQueueChanged(q: MutableList<android.media.session.MediaSession.QueueItem>?) { pushAll(false) }
     }
 
     override fun onListenerConnected() {
@@ -188,10 +189,30 @@ class MusicService : NotificationListenerService() {
         str(MediaMetadata.METADATA_KEY_WRITER)?.let { lines += "Writer: $it" }
         num(MediaMetadata.METADATA_KEY_DURATION)?.let { lines += "Length: %d:%02d".format(it / 60000, it / 1000 % 60) }
         m?.getDescription()?.subtitle?.toString()?.takeIf { it.isNotBlank() && !lines.contains(it) }?.let { lines += it }
+        val next = upNext(c)
+        if (next.isNotEmpty()) { lines += ""; lines += "Up next:"; next.forEachIndexed { i, t -> lines += "${i + 1}. $t" } }
         lines += ""
         lines += "Playing on ${playerName(c)}"
         volumePct(c).takeIf { it >= 0 }?.let { lines += "Volume $it%" }
-        return clean(lines.joinToString("\n"), 300)
+        return clean(lines.joinToString("\n"), 560)
+    }
+
+    /** The next few songs of the player's queue, "Title - Artist". */
+    private fun upNext(c: MediaController): List<String> {
+        val q = c.queue ?: return emptyList()
+        if (q.isEmpty()) return emptyList()
+        val activeId = c.playbackState?.activeQueueItemId ?: -1L
+        var i = q.indexOfFirst { it.queueId == activeId }
+        if (i < 0) {                                                     // no id: find the current title
+            val t = c.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)
+            i = q.indexOfFirst { it.description.title?.toString() == t }
+        }
+        return q.drop(i + 1).take(5).map { item ->
+            val d = item.description
+            val title = clean(d.title, 40)
+            val by = clean(d.subtitle, 28)
+            if (by.isNotEmpty()) "$title - $by" else title
+        }.filter { it.isNotBlank() }
     }
 
     private fun pushState() {

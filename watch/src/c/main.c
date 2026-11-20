@@ -17,7 +17,7 @@ static char s_title[72], s_artist[56], s_player[24];
 static bool s_has_song, s_playing, s_vol_mode, s_rate_mode;
 static int s_liked;               // 1 liked, -1 disliked, 0 none
 static AppTimer *s_rate_timer;
-static char s_info[320];          // album, year, genre, track n of m, player...
+static char s_info[600];          // album, year, genre, track n of m, player...
 static Window *s_info_win;
 static ScrollLayer *s_info_scroll;
 static TextLayer *s_info_head, *s_info_text;
@@ -358,7 +358,7 @@ static void tick(struct tm *t, TimeUnits u) {
 static void demo(void) {
   s_has_song = true; s_playing = true; s_pos = 83000; s_dur = 214000; s_vol = 60;
   s_liked = 1; strcpy(s_title, "Midnight Orchard");
-  strcpy(s_info, "The Paper Lanterns\nAlbum: Lantern Light (2024)\nGenre: Indie folk\nTrack 3 of 11\n\nPlaying on YouTube Music\nVolume 60%"); strcpy(s_artist, "The Paper Lanterns");
+  strcpy(s_info, "The Paper Lanterns\nAlbum: Lantern Light (2024)\nLength: 3:34\n\nUp next:\n1. Harbour Lights - Ada Vale\n2. Slow Comet - The Paper Lanterns\n3. Northbound - Kite Season\n\nPlaying on YouTube Music\nVolume 60%"); strcpy(s_artist, "The Paper Lanterns");
   s_accent = PBL_IF_COLOR_ELSE(GColorImperialPurple, GColorBlack);
   s_art = gbitmap_create_blank(GSize(s_S, s_S), PBL_IF_COLOR_ELSE(GBitmapFormat8Bit, GBitmapFormat1Bit));
   uint8_t *d = gbitmap_get_data(s_art); int row = gbitmap_get_bytes_per_row(s_art);
