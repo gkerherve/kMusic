@@ -5,3 +5,5 @@ android/build/
 android/app/build/
 local.properties
 .DS_Store
+*.apk
+kMusic-watch-*.pbw
