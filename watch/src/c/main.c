@@ -117,7 +117,7 @@ static void draw_note(GContext *ctx, GRect r) {   // placeholder cover: a music 
 
 // Big glyph on a black tab that sticks out of the screen edge, right next to a physical button.
 static void edge_tab(GContext *ctx, GRect b, int y, int kind, bool big) {
-  int R = big ? 24 : 18, g = big ? 14 : 10;
+  int R = big ? 26 : 20, g = big ? 13 : 10;
 #if defined(PBL_ROUND)
   int r = b.size.w / 2, dy = y - b.size.h / 2, ex = b.size.w / 2;
   for (int x = 0; x <= r; x++) if (x * x + dy * dy <= r * r) ex = b.size.w / 2 + x;   // rim x at this y
@@ -130,7 +130,7 @@ static void edge_tab(GContext *ctx, GRect b, int y, int kind, bool big) {
   graphics_context_set_stroke_width(ctx, 1);
   graphics_draw_circle(ctx, GPoint(ex + 4, y), R);
   graphics_context_set_fill_color(ctx, GColorWhite);
-  draw_icon(ctx, kind, GPoint(ex - R / 2 + 2, y), g);
+  draw_icon(ctx, kind, GPoint(ex - (R - 4) / 2 - 1, y), g);   // centred in the visible part of the tab
 }
 
 static void canvas_draw(Layer *l, GContext *ctx) {
