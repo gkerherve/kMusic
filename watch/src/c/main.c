@@ -209,7 +209,8 @@ static void canvas_draw(Layer *l, GContext *ctx) {
   if (s_has_song) {
     static char tb[24], vb2[12];
     int ps = pos / 1000, ds = s_dur / 1000;
-    if (s_dur > 0) snprintf(tb, sizeof(tb), "%d:%02d / %d:%02d", ps / 60, ps % 60, ds / 60, ds % 60);
+    int rs = ds - ps; if (rs < 0) rs = 0;
+    if (s_dur > 0) snprintf(tb, sizeof(tb), "%d:%02d  -%d:%02d", ps / 60, ps % 60, rs / 60, rs % 60);
     else snprintf(tb, sizeof(tb), "%d:%02d", ps / 60, ps % 60);
     if (s_vol >= 0) snprintf(vb2, sizeof(vb2), big || PBL_IF_ROUND_ELSE(true, false) ? "Vol %d%%" : "%d%%", s_vol); else vb2[0] = 0;
     GFont pf = fonts_get_system_font(big ? FONT_KEY_GOTHIC_18_BOLD : FONT_KEY_GOTHIC_14_BOLD);
