@@ -131,6 +131,13 @@ static void update_icons(void) {
   for (int i = 0; i < 3; i++) if (now[i] != last[i]) { action_bar_layer_set_icon_animated(s_bar, ids[i], now[i], last[i] != NULL); last[i] = now[i]; }
 }
 
+static void pill(GContext *ctx, const char *txt, GFont f, GRect r, GTextAlignment al) {
+  graphics_context_set_fill_color(ctx, GColorBlack);
+  graphics_fill_rect(ctx, r, r.size.h / 2, GCornersAll);
+  graphics_context_set_text_color(ctx, GColorWhite);
+  graphics_draw_text(ctx, txt, f, GRect(r.origin.x + 2, r.origin.y - (r.size.h > 18 ? 3 : 2), r.size.w - 4, r.size.h), GTextOverflowModeFill, al, NULL);
+}
+
 static void canvas_draw(Layer *l, GContext *ctx) {
   GRect b = layer_get_bounds(l);
   int W = b.size.w, H = b.size.h, S = s_S;
@@ -197,6 +204,28 @@ static void canvas_draw(Layer *l, GContext *ctx) {
   graphics_context_set_text_color(ctx, sub);
   graphics_draw_text(ctx, l2, f2, GRect(4, y, S - 6, 22), GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
 #endif
+
+  // ---- time and volume pills on the bottom of the cover
+  if (s_has_song) {
+    static char tb[24], vb2[12];
+    int ps = pos / 1000, ds = s_dur / 1000;
+    if (s_dur > 0) snprintf(tb, sizeof(tb), "%d:%02d / %d:%02d", ps / 60, ps % 60, ds / 60, ds % 60);
+    else snprintf(tb, sizeof(tb), "%d:%02d", ps / 60, ps % 60);
+    if (s_vol >= 0) snprintf(vb2, sizeof(vb2), big || PBL_IF_ROUND_ELSE(true, false) ? "Vol %d%%" : "%d%%", s_vol); else vb2[0] = 0;
+    GFont pf = fonts_get_system_font(big ? FONT_KEY_GOTHIC_18_BOLD : FONT_KEY_GOTHIC_14_BOLD);
+    int ph = big ? 22 : 17;
+#if defined(PBL_ROUND)
+    int py = band - ph - 3;
+    pill(ctx, tb, pf, GRect(W / 2 - 60, py, 120, ph), GTextAlignmentCenter);
+    if (vb2[0]) pill(ctx, vb2, pf, GRect(W / 2 - 34, py - ph - 3, 68, ph), GTextAlignmentCenter);
+#else
+    int py = S - ph - 3;
+    int tw2 = s_dur > 0 ? (big ? 104 : 72) : (big ? 48 : 36);
+    pill(ctx, tb, pf, GRect(3, py, tw2, ph), GTextAlignmentCenter);
+    int vw = big ? 70 : 36;
+    if (vb2[0]) pill(ctx, vb2, pf, GRect(S - vw - 3, py, vw, ph), GTextAlignmentCenter);
+#endif
+  }
 
   // ---- liked / disliked badge, top-left of the cover
   if (s_has_song && s_liked && !s_overlay) {
