@@ -38,6 +38,7 @@ class MusicService : NotificationListenerService() {
     private var artSize = 0; private var artRow = 0; private var artColor = true
     // what we last sent
     private var lastTrackKey = ""; private var artId = 0; private var liked = 0
+    private var sentArt: Bitmap? = null   // cover last sent to the watch
     private var accent = 0xC0 or (1 shl 4) or 2   // default purple
 
     private val sessionsListener = MediaSessionManager.OnActiveSessionsChangedListener { pickController(it) }
@@ -263,7 +264,12 @@ class MusicService : NotificationListenerService() {
             K.LIKED to PebbleLink.V.I(liked),
             K.INFO to PebbleLink.V.S(info(c, m))
         ))
-        if ((newTrack || force) && artSize > 0) sendArt(art)
+        // players often send the title first and the cover a moment later: send it when it shows up
+        val artChanged = art != null && (sentArt == null || try { !art.sameAs(sentArt) } catch (_: Exception) { true })
+        if (artSize > 0 && (newTrack || force || artChanged)) {
+            sentArt = art
+            sendArt(art)
+        }
     }
 
     private fun sendArt(art: Bitmap?) {

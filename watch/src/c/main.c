@@ -23,7 +23,22 @@ static void waited(void *d);          // album, year, genre, track n of m, playe
 static Window *s_info_win;
 static ScrollLayer *s_info_scroll;
 static TextLayer *s_info_head, *s_info_text;
-static int32_t s_pos, s_dur;      // ms
+static int32_t s_pos, s_dur;      // ms; s_pos was the position at s_pos_t
+static time_t s_pos_t; static uint16_t s_pos_ms;
+static AppTimer *s_refresh;
+static time_t s_active_until;     // buttons pressed recently: refresh every second
+static void stamp_pos(void) { time_ms(&s_pos_t, &s_pos_ms); }
+static int32_t cur_pos(void) {     // position now, counted on the watch between phone updates
+  if (!s_playing) return s_pos;
+  time_t t; uint16_t ms; time_ms(&t, &ms);
+  int32_t p = s_pos + (int32_t)(t - s_pos_t) * 1000 + ((int32_t)ms - s_pos_ms);
+  return s_dur > 0 && p > s_dur ? s_dur : p;
+}
+static void refresh(void *d);
+static void touch_active(void) {   // the watch is being used: show the time every second for a while
+  s_active_until = time(NULL) + 20;
+  if (s_refresh) app_timer_reschedule(s_refresh, 1000); else s_refresh = app_timer_register(1000, refresh, NULL);
+}
 static int s_vol = -1;            // 0..100, -1 unknown
 static int s_overlay;
 static GColor s_accent;
@@ -155,7 +170,7 @@ static void canvas_draw(Layer *l, GContext *ctx) {
   } else draw_note(ctx, GRect(S / 4, S / 4 - PBL_IF_ROUND_ELSE(S / 10, 0), S / 2, S / 2));
 
   // ---- text
-  int32_t pos = s_pos > s_dur && s_dur > 0 ? s_dur : s_pos;
+  int32_t pos = cur_pos();
   int pct = s_vol_mode ? (s_vol < 0 ? 0 : s_vol) : (s_dur > 0 ? (int)((int64_t)pos * 100 / s_dur) : 0);
   const char *l1 = s_has_song ? s_title : s_phone_ok ? "Nothing playing" : s_waited ? "Get the companion" : "Connecting...";
   const char *l2 = s_has_song ? s_artist : s_phone_ok ? "Play music on your phone" : s_waited ? "github.com/gkerherve/kMusic" : "";
@@ -277,6 +292,7 @@ static void vol_step(void) {
 }
 static void hold_tick(void *d) { vol_step(); s_hold_timer = app_timer_register(350, hold_tick, NULL); }
 static void hold_start(ClickRecognizerRef r, void *c) {
+  touch_active();
   if (s_rate_mode) return;
   s_hold_cmd = click_recognizer_get_button_id(r) == BUTTON_ID_UP ? CMD_VOL_UP : CMD_VOL_DOWN;
   hold_tick(NULL);
@@ -316,6 +332,7 @@ static void info_unload(Window *w) {
 static void rate_end(void *d) { s_rate_timer = NULL; s_rate_mode = false; layer_mark_dirty(s_canvas); }
 static void rate_stop(void) { if (s_rate_timer) app_timer_cancel(s_rate_timer); rate_end(NULL); }
 static void select_long(ClickRecognizerRef r, void *c) {
+  touch_active();
   s_rate_mode = true; vibes_short_pulse();
   if (s_rate_timer) app_timer_reschedule(s_rate_timer, 4000); else s_rate_timer = app_timer_register(4000, rate_end, NULL);
   layer_mark_dirty(s_canvas);
@@ -327,10 +344,12 @@ static void rate(int v) {
   show_overlay(v > 0 ? OV_LIKE : OV_DISLIKE);
   vibes_short_pulse();
 }
-static void up_click(ClickRecognizerRef r, void *c) { if (s_rate_mode) { rate(1); return; } send_cmd(CMD_PREV); show_overlay(OV_PREV); }
-static void down_click(ClickRecognizerRef r, void *c) { if (s_rate_mode) { rate(-1); return; } send_cmd(CMD_NEXT); show_overlay(OV_NEXT); }
+static void up_click(ClickRecognizerRef r, void *c) { touch_active(); if (s_rate_mode) { rate(1); return; } send_cmd(CMD_PREV); show_overlay(OV_PREV); }
+static void down_click(ClickRecognizerRef r, void *c) { touch_active(); if (s_rate_mode) { rate(-1); return; } send_cmd(CMD_NEXT); show_overlay(OV_NEXT); }
 static void select_click(ClickRecognizerRef r, void *c) {
+  touch_active();
   if (s_rate_mode) { rate_stop(); window_stack_push(s_info_win, true); return; }
+  s_pos = cur_pos(); stamp_pos();
   s_playing = !s_playing;
   send_cmd(CMD_PLAYPAUSE); show_overlay(s_playing ? OV_PLAY : OV_PAUSE);
 }
@@ -359,8 +378,8 @@ static void inbox(DictionaryIterator *it, void *ctx) {
   }
   if ((t = dict_find(it, MESSAGE_KEY_LIKED))) s_liked = t->value->int32;
   copy_str(it, MESSAGE_KEY_INFO, s_info, sizeof(s_info));
-  if ((t = dict_find(it, MESSAGE_KEY_STATE))) s_playing = t->value->int32 != 0;
-  if ((t = dict_find(it, MESSAGE_KEY_POS))) s_pos = t->value->int32;
+  if ((t = dict_find(it, MESSAGE_KEY_STATE))) { s_pos = cur_pos(); stamp_pos(); s_playing = t->value->int32 != 0; }
+  if ((t = dict_find(it, MESSAGE_KEY_POS))) { s_pos = t->value->int32; stamp_pos(); }
   if ((t = dict_find(it, MESSAGE_KEY_DUR))) s_dur = t->value->int32;
   if ((t = dict_find(it, MESSAGE_KEY_VOL))) s_vol = t->value->int32;
   if ((t = dict_find(it, MESSAGE_KEY_ACCENT))) s_accent = (GColor){ .argb = (uint8_t)t->value->int32 };
@@ -391,14 +410,15 @@ static void inbox(DictionaryIterator *it, void *ctx) {
   }
   layer_mark_dirty(s_canvas);
 }
-static void tick(struct tm *t, TimeUnits u) {
-  if (s_playing && s_has_song && s_dur > 0) { s_pos += 1000; if (s_pos > s_dur) s_pos = s_dur; }
-  if (s_has_song) layer_mark_dirty(s_canvas);
+// Redraw the time every 10 s to save battery, every second while buttons are being used.
+static void refresh(void *d) {
+  if (s_has_song && s_playing && s_canvas) layer_mark_dirty(s_canvas);
+  s_refresh = app_timer_register(time(NULL) < s_active_until ? 1000 : 10000, refresh, NULL);
 }
 
 #ifdef KMUSIC_DEMO
 static void demo(void) {
-  s_has_song = true; s_playing = true; s_pos = 83000; s_dur = 214000; s_vol = 60;
+  s_has_song = true; s_playing = true; s_pos = 83000; stamp_pos(); s_dur = 214000; s_vol = 60;
   s_liked = 1; strcpy(s_title, "Midnight Orchard");
   strcpy(s_info, "The Paper Lanterns\nAlbum: Lantern Light (2024)\nLength: 3:34\n\nUp next:\n1. Harbour Lights - Ada Vale\n2. Slow Comet - The Paper Lanterns\n3. Northbound - Kite Season\n\nPlaying on YouTube Music\nVolume 60%"); strcpy(s_artist, "The Paper Lanterns");
   s_accent = PBL_IF_COLOR_ELSE(GColorImperialPurple, GColorBlack);
@@ -463,7 +483,8 @@ int main(void) {
   app_message_register_inbox_received(inbox);
   uint32_t in = app_message_inbox_size_maximum();
   app_message_open(in > 4096 ? 4096 : in, 256);
-  tick_timer_service_subscribe(SECOND_UNIT, tick);
+  stamp_pos();
+  touch_active();
 #ifdef KMUSIC_DEMO
   demo();
 #else

@@ -71,7 +71,13 @@ class PebbleLink(private val ctx: Context, private val onMessage: (Map<Int, Any>
     }
 
     /** Drop anything still waiting (e.g. the old song's cover) and send fresh. */
-    fun clearQueue() { queue.clear() }
+    fun clearQueue() {
+        // keep the message already sent: its ACK will remove it, so dropping it here
+        // would make that ACK delete the next (unsent) message instead
+        val sent = if (inFlight != -1) queue.firstOrNull() else null
+        queue.clear()
+        if (sent != null) queue.addLast(sent)
+    }
 
     fun send(msg: Map<Int, V>) { queue.addLast(msg); pump() }
 
